@@ -55,3 +55,7 @@ Generate the voiceover, drop the `<audio>` element into the composition, then `h
 - Each script resolves the key as: `GEMINI_API_KEY` env → (optional) `op read $GEMINI_OP_REF`.
 - Outputs carry Google's SynthID watermark (images) and grounding metadata (research).
 - MIT licensed. Built on the `google-genai` SDK.
+
+## Disclaimer
+
+Unofficial. This project is **not affiliated with, endorsed by, or sponsored by Google**. It is an independent, MIT-licensed wrapper around Google's publicly documented Gemini Interactions API. *Gemini*, *Nano Banana*, *Lyria*, and related names are trademarks of Google LLC, used here only descriptively to identify the API and models this tool integrates with. Use of those APIs is subject to Google's own terms.

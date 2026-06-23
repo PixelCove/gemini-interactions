@@ -28,14 +28,15 @@ def resolve_key(op_ref: str) -> str:
         if os.environ.get(var):
             return os.environ[var]
     for ref in (op_ref, FALLBACK_OP_REF):
+        if not ref:
+            continue
         try:
             r = subprocess.run(["op", "read", ref], capture_output=True, text=True, timeout=20)
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
             break
-    sys.exit("ERROR: no Gemini API key. Set GEMINI_API_KEY or ensure `op` can read "
-             f"{op_ref} (or {FALLBACK_OP_REF}).")
+    sys.exit("ERROR: no Gemini API key. Set GEMINI_API_KEY (or set GEMINI_OP_REF so `op` can read it).")
 
 
 def build_input(prompt: str, image_paths: list[str]):
@@ -107,9 +108,13 @@ def main():
         b64 = extract_image_b64(interaction)
         if not b64:
             sys.exit("ERROR: no image returned (likely a safety block — rephrase the prompt).")
+        try:
+            img_bytes = base64.b64decode(b64, validate=True)
+        except Exception as e:
+            sys.exit(f"ERROR: returned image data was not valid base64: {e}")
         out_path = base if args.count == 1 else base[:-4] + f"-{i + 1}.png"
-        with open(out_path, "wb") as f:
-            f.write(base64.b64decode(b64))
+        with open(out_path, "wb") as f:  # decode first, so a bad response can't truncate an existing file
+            f.write(img_bytes)
         saved.append(os.path.abspath(out_path))
 
     print(json.dumps({

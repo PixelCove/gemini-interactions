@@ -29,13 +29,15 @@ def resolve_key(op_ref: str) -> str:
         if os.environ.get(var):
             return os.environ[var]
     for ref in (op_ref, FALLBACK_OP_REF):
+        if not ref:
+            continue
         try:
             r = subprocess.run(["op", "read", ref], capture_output=True, text=True, timeout=20)
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
             break
-    sys.exit(f"ERROR: no Gemini API key. Set GEMINI_API_KEY or ensure `op` can read {op_ref}.")
+    sys.exit("ERROR: no Gemini API key. Set GEMINI_API_KEY (or set GEMINI_OP_REF so `op` can read it).")
 
 
 def render_grounded(interaction) -> tuple[str, list[dict]]:
@@ -91,12 +93,16 @@ def main():
         except Exception as e:
             sys.exit(f"ERROR: Deep Research start failed: {e}")
         sys.stderr.write(f"Deep Research started ({it.id}); polling…\n")
+        deadline = time.monotonic() + 1800  # 30-min cap so a stuck/cancelled run can't poll forever
         while True:
             it = client.interactions.get(it.id)
-            if it.status == "completed":
+            status = getattr(it, "status", None)
+            if status == "completed":
                 break
-            if it.status == "failed":
-                sys.exit(f"ERROR: Deep Research failed: {getattr(it,'error',None)}")
+            if status in ("failed", "cancelled", "canceled", "expired", "error"):
+                sys.exit(f"ERROR: Deep Research {status}: {getattr(it, 'error', None)}")
+            if time.monotonic() > deadline:
+                sys.exit(f"ERROR: Deep Research timed out after 30 min (last status: {status}, id: {it.id}).")
             time.sleep(10)
         # report = every text block across model_output steps; sources = URLCitation
         # annotations (deduped); the agent also emits ImageContent charts (no .text) — skipped here.
@@ -139,19 +145,29 @@ def main():
             r1, s1 = grounded(maps_tool)
             r2, s2 = grounded(search_tool)
             report = f"### Maps-grounded\n\n{r1}\n\n### Search-grounded\n\n{r2}"
-            sources = s1 + s2
+            seen, sources = set(), []  # dedupe across the two passes by url (fallback name)
+            for s in s1 + s2:
+                k = s.get("url") or s.get("name")
+                if k and k not in seen:
+                    seen.add(k)
+                    sources.append(s)
 
     if not report:
         sys.exit("ERROR: empty report returned.")
 
-    # save the Deep Research native chart next to the report, if present
+    # save the Deep Research native chart next to the report, if present (decode before writing)
     chart_path = None
     if chart and args.out:
-        mime = chart[1] or "image/png"
-        ext = "png" if "png" in mime else ("jpg" if "jpeg" in mime else "img")
-        chart_path = os.path.splitext(args.out)[0] + "-chart." + ext
-        with open(chart_path, "wb") as f:
-            f.write(base64.b64decode(chart[0]))
+        try:
+            chart_bytes = base64.b64decode(chart[0], validate=True)
+        except Exception:
+            chart_bytes = None
+        if chart_bytes:
+            mime = chart[1] or "image/png"
+            ext = "png" if "png" in mime else ("jpg" if "jpeg" in mime else "img")
+            chart_path = os.path.splitext(args.out)[0] + "-chart." + ext
+            with open(chart_path, "wb") as f:
+                f.write(chart_bytes)
 
     md = f"# Local-SEO research\n\n**Query:** {args.query}\n\n{report}\n"
     if chart_path:

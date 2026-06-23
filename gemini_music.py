@@ -37,10 +37,14 @@ def resolve_key(op_ref: str) -> str:
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
         if os.environ.get(var):
             return os.environ[var]
-    r = subprocess.run(["op", "read", op_ref], capture_output=True, text=True, timeout=20)
-    if r.returncode == 0 and r.stdout.strip():
-        return r.stdout.strip()
-    raise RuntimeError(f"No Gemini API key: set GEMINI_API_KEY or ensure `op` can read {op_ref}")
+    if op_ref:
+        try:
+            r = subprocess.run(["op", "read", op_ref], capture_output=True, text=True, timeout=20)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    raise RuntimeError("No Gemini API key: set GEMINI_API_KEY (or set GEMINI_OP_REF so `op` can read it)")
 
 
 def load_prompts(path: Path) -> list[dict[str, Any]]:
@@ -169,7 +173,8 @@ def write_outputs(outdir: Path, item: dict[str, Any], response: dict, project: s
         typ = output.get("type")
         if typ == "audio" and output.get("data"):
             mime = output.get("mime_type", "")
-            ext = "mp3" if mime == "audio/mpeg" else "audio"
+            ext = {"audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav",
+                   "audio/x-wav": "wav", "audio/wave": "wav"}.get(mime, "audio")
             audio_path = tdir / f"track.{ext}"
             audio_path.write_bytes(base64.b64decode(output["data"]))
             audio_files.append(audio_path)

@@ -24,13 +24,14 @@ def resolve_key() -> str:
     for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
         if os.environ.get(var):
             return os.environ[var]
-    try:
-        r = subprocess.run(["op", "read", OP_REF], capture_output=True, text=True, timeout=20)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    sys.exit("ERROR: set GEMINI_API_KEY (or ensure `op` can read the key).")
+    if OP_REF:
+        try:
+            r = subprocess.run(["op", "read", OP_REF], capture_output=True, text=True, timeout=20)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    sys.exit("ERROR: set GEMINI_API_KEY (or set GEMINI_OP_REF so `op` can read the key).")
 
 
 def write_wav(path: str, pcm: bytes, rate: int = 24000):
@@ -57,9 +58,12 @@ def main():
     client = genai.Client(api_key=resolve_key())
 
     if args.speaker:
-        speech_config = {"multi_speaker_voice_config": [
-            {"speaker": s.split("=", 1)[0], "voice": s.split("=", 1)[1]} for s in args.speaker
-        ]}
+        if not all("=" in s for s in args.speaker):
+            sys.exit("ERROR: --speaker must be 'Name=Voice' (e.g. --speaker Host=Kore).")
+        if len(args.speaker) > 2:
+            sys.exit("ERROR: multi-speaker TTS supports at most 2 speakers.")
+        # Interactions API multi-speaker: flat list of {speaker, voice} (same container as single-speaker)
+        speech_config = [{"speaker": s.split("=", 1)[0], "voice": s.split("=", 1)[1]} for s in args.speaker]
     else:
         speech_config = [{"voice": args.voice}]
 
